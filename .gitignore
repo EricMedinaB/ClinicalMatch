@@ -1,0 +1,57 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data
+data/input/*
+data/raw/*
+data/processed/*
+data/cache/*
+!data/input/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/cache/.gitkeep
+!data/examples/
+!data/examples/**
+
+# Runtime outputs
+outputs/
+runs/
+reports/
+predictions/
+traces/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Local model/cache files
+*.sqlite
+*.db
+clinical_trials_cache/
