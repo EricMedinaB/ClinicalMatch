@@ -114,9 +114,3 @@ class InputAdapter:
                 raise ValueError(f"patient_id duplicado: {patient_id}")
 
             seen.add(patient_id)
-    
-
-
-if __name__ == "__main__":
-    inAd = InputAdapter(r"D:\Documents\ClinicalMatch\data\raw JSON\outPut.json")
-    inAd.adapt_files()
