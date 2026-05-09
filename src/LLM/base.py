@@ -3,7 +3,6 @@ from typing import Any, Type
 
 from pydantic import BaseModel
 
-
 class LLMClient(ABC):
     @abstractmethod
     def generate_text(
