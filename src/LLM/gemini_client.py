@@ -1,13 +1,10 @@
 import os
-from typing import Type, cast
-from dotenv import load_dotenv
-from pathlib import Path
+from typing import cast
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
 
-from LLM.base import LLMClient
+from LLM.base import LLMClient, SchemaT
 
 
 class GeminiClient(LLMClient):
@@ -43,11 +40,11 @@ class GeminiClient(LLMClient):
         self,
         *,
         prompt: str,
-        response_schema: Type[BaseModel],
+        response_schema: type[SchemaT],
         system_instruction: str | None = None,
         temperature: float = 0.0,
         max_output_tokens: int | None = None,
-    ) -> BaseModel:
+    ) -> SchemaT:
         config = types.GenerateContentConfig(
             temperature=temperature,
             system_instruction=system_instruction,
@@ -67,24 +64,4 @@ class GeminiClient(LLMClient):
                 f"Gemini no devolvió JSON parseable para el schema {response_schema.__name__}"
             )
 
-        return cast(BaseModel, response.parsed)
-    
-if __name__ == "__main__":
-    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-    
-    load_dotenv(dotenv_path=env_path)
-
-    model = os.getenv("GEMINI_FLASH_LITE_MODEL")
-
-    if model is None:
-        raise ValueError("Falta GEMINI_FLASH_LITE_MODEL")
-
-    client = GeminiClient(
-        model_name=model
-    )
-
-    response = client.generate_text(
-        prompt="¿Cuál es la capital de Francia?"
-    )
-
-    print(response)
+        return cast(SchemaT, response.parsed)

@@ -1,7 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Any, Type
+from typing import TypeVar
 
 from pydantic import BaseModel
+
+
+SchemaT = TypeVar("SchemaT", bound=BaseModel)
+
 
 class LLMClient(ABC):
     @abstractmethod
@@ -20,9 +24,9 @@ class LLMClient(ABC):
         self,
         *,
         prompt: str,
-        response_schema: Type[BaseModel],
+        response_schema: type[SchemaT],
         system_instruction: str | None = None,
         temperature: float = 0.0,
         max_output_tokens: int | None = None,
-    ) -> BaseModel:
+    ) -> SchemaT:
         pass

@@ -1,5 +1,7 @@
 import os
 from enum import Enum
+from dotenv import load_dotenv
+from pathlib import Path
 
 from LLM.base import LLMClient
 from LLM.gemini_client import GeminiClient
@@ -11,6 +13,10 @@ class LLMSize(str, Enum):
 
 
 def create_llm(size: LLMSize = LLMSize.SMALL) -> LLMClient:
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    
+    load_dotenv(dotenv_path=env_path)
+    
     if size == LLMSize.SMALL:
         model = os.getenv("GEMINI_FLASH_LITE_MODEL")
 
