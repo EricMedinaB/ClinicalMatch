@@ -3,7 +3,7 @@ import xmltodict
 from pathlib import Path
 
 class InputAdapter:
-    def __init__(self, output_path: str):
+    def __init__(self, output_path: str | Path):
         project_root = Path(__file__).resolve().parent.parent
 
         self.root = project_root / "data" / "input"
