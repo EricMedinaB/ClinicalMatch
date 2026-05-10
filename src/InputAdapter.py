@@ -16,7 +16,7 @@ class InputAdapter:
         if not self.root.is_dir():
             raise NotADirectoryError(f"La ruta no es una carpeta: {self.root}")
 
-    def adapt_files(self) -> Path:
+    def adapt_files(self) -> tuple[Path, dict]:
         data = []
 
         for file in self.root.rglob("*"):
@@ -36,14 +36,14 @@ class InputAdapter:
                 "La lista 'data' está vacía. No hay datos para unificar."
             )
 
-        data = self.unify_json(data)
+        unified_data = self.unify_json(data)
 
         self.ruta_json.parent.mkdir(parents=True, exist_ok=True)
 
         with open(self.ruta_json, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+            json.dump(unified_data, f, indent=4, ensure_ascii=False)
 
-        return self.ruta_json
+        return self.ruta_json, unified_data
     
 
     def xml_adapter(self, ruta_xml: Path) -> dict:
