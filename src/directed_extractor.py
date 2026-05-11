@@ -212,7 +212,8 @@ class DirectedPatientExtractor:
         prompt_version: str = "directed_patient_extractor_v1",
         schema_version: str = "patient_attribute_set_v1",
         max_attempts: int = 1,
-    ):
+        question_generator: Optional[Any] = None,
+):
         self.llm_client = llm_client
         self.registry_id = registry_id
 
@@ -222,6 +223,8 @@ class DirectedPatientExtractor:
         self.prompt_version = prompt_version
         self.schema_version = schema_version
         self.max_attempts = max(1, max_attempts)
+
+        self.question_generator = question_generator
 
     def extract(
         self,
@@ -463,6 +466,13 @@ class DirectedPatientExtractor:
                 registry_item=registry_item,
             )
 
+            if matched_attr.status in {"not_found", "extraction_error"}:
+                matched_attr.missing_question = self._generate_missing_question(
+                    registry_item=registry_item,
+                    status=matched_attr.status,
+                    error=matched_attr.error,
+                )
+
             final_attributes.append(matched_attr)
 
         for attr in llm_attributes:
@@ -490,10 +500,10 @@ class DirectedPatientExtractor:
 
         missing_question = None
         if status in {"not_found", "extraction_error"}:
-            missing_question = (
-                registry_item.get("missing_question")
-                or registry_item.get("question")
-                or f"¿Cuál es el valor actual de {canonical_name} del paciente?"
+            missing_question = self._generate_missing_question(
+                registry_item=registry_item,
+                status=status,
+                error=error,
             )
 
         return ExtractedPatientAttribute(
@@ -910,3 +920,66 @@ class DirectedPatientExtractor:
                 keys.append(key)
 
         return keys
+    
+    def _generate_missing_question(
+        self,
+        registry_item: dict,
+        status: AttributeStatus,
+        patient_id: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Delega la generación de preguntas faltantes al módulo MissingInfoQuestionGenerator.
+
+        El método externo esperado es:
+            generate_question(input_dict: dict) -> dict
+
+        Se espera que devuelva algo como:
+            {
+                "question": "...",
+                ...
+            }
+
+        También se acepta:
+            {
+                "missing_question": "...",
+                ...
+            }
+        """
+        if self.question_generator is None:
+            return None
+
+        payload = {
+            "patient_id": patient_id,
+            "attribute": {
+                "attribute_id": self._registry_attribute_id(registry_item),
+                "canonical_name": self._registry_canonical_name(registry_item),
+                "unit": registry_item.get("unit"),
+                "type": registry_item.get("type"),
+                "allowed_values": registry_item.get("allowed_values"),
+                "aliases": registry_item.get("aliases", []),
+            },
+            "registry_item": registry_item,
+            "status": status,
+            "error": error,
+            "required_by": [
+                item.model_dump()
+                for item in self._required_by_from_registry_item(registry_item)
+            ],
+        }
+
+        result = self.question_generator.generate_question(payload)
+
+        if not isinstance(result, dict):
+            return None
+
+        question = (
+            result.get("question")
+            or result.get("missing_question")
+            or result.get("text")
+        )
+
+        if question is None:
+            return None
+
+        return str(question)
