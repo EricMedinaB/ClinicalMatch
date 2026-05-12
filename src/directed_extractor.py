@@ -6,6 +6,8 @@ from typing import Literal, Any, List, Optional, Dict, Tuple
 
 from pydantic import BaseModel, Field
 
+from LLM.prompt_loader import load_prompt
+
 
 AttributeStatus = Literal[
     "found",
@@ -188,19 +190,6 @@ class LLMExtractionResponse(BaseModel):
     flags: List[ExtractionFlag] = Field(default_factory=list)
 
 
-SYSTEM_PROMPT = """
-Eres el 'Directed Patient Extractor', un agente clínico experto.
-Tu objetivo es cruzar el perfil clínico previamente normalizado de un paciente y su texto crudo original, con una lista de atributos médicos requeridos por ensayos clínicos (Attribute Registry).
-
-REGLAS ESTRICTAS:
-1. NO INVENTES DATOS: Si un atributo no está en el texto ni en el perfil normalizado, márcalo como "not_found" y genera una "missing_question" clínica y específica.
-2. USA EL TRABAJO PREVIO: Revisa primero el 'normalized_profile'. Si el dato ya fue extraído ahí (ej. age, sex), úsalo directamente mapeando la evidencia.
-3. ESTADOS: Diferencia bien entre "not_found" y "ambiguous".
-4. EVIDENCIA: Todo atributo encontrado debe tener un fragmento exacto en el campo 'evidence'.
-5. IMPACTO: Usa la información de 'required_by_trials' para rellenar los campos de requerimiento.
-"""
-
-
 class DirectedPatientExtractor:
     def __init__(
         self,
@@ -210,10 +199,11 @@ class DirectedPatientExtractor:
         model_name: Optional[str] = None,
         temperature: float = 0.0,
         prompt_version: str = "directed_patient_extractor_v1",
+        prompt_filename: str = "directed_patient_extractor.md",
         schema_version: str = "patient_attribute_set_v1",
         max_attempts: int = 1,
         question_generator: Optional[Any] = None,
-):
+    ):
         self.llm_client = llm_client
         self.registry_id = registry_id
 
@@ -223,6 +213,7 @@ class DirectedPatientExtractor:
         self.prompt_version = prompt_version
         self.schema_version = schema_version
         self.max_attempts = max(1, max_attempts)
+        self.prompt_filename = prompt_filename
 
         self.question_generator = question_generator
 
@@ -260,6 +251,7 @@ class DirectedPatientExtractor:
             attributes, registry_flags = self._prepare_attributes_from_registry(
                 llm_attributes=llm_response.attributes,
                 registry_attributes=registry_attributes,
+                patient_id=patient_id,
             )
 
             flags = []
@@ -289,6 +281,7 @@ class DirectedPatientExtractor:
             failed_attributes = self._build_failed_attributes(
                 attribute_registry=attribute_registry,
                 error=str(e),
+                patient_id=patient_id,
             )
 
             response_data = PatientAttributeSet(
@@ -359,7 +352,7 @@ class DirectedPatientExtractor:
             try:
                 raw_response = self.llm_client.generate_json(
                     prompt=user_prompt,
-                    system_instruction=SYSTEM_PROMPT,
+                    system_instruction=load_prompt(self.prompt_filename),
                     temperature=self.temperature,
                     response_schema=LLMExtractionResponse,
                 )
@@ -403,6 +396,7 @@ class DirectedPatientExtractor:
         self,
         llm_attributes: List[ExtractedPatientAttribute],
         registry_attributes: List[dict],
+        patient_id: Optional[str] = None,
     ) -> Tuple[List[ExtractedPatientAttribute], List[ExtractionFlag]]:
         flags: List[ExtractionFlag] = []
 
@@ -441,6 +435,7 @@ class DirectedPatientExtractor:
                     registry_item=registry_item,
                     status="not_found",
                     error=None,
+                    patient_id=patient_id,
                 )
                 flags.append(
                     ExtractionFlag(
@@ -470,6 +465,7 @@ class DirectedPatientExtractor:
                 matched_attr.missing_question = self._generate_missing_question(
                     registry_item=registry_item,
                     status=matched_attr.status,
+                    patient_id=patient_id,
                     error=matched_attr.error,
                 )
 
@@ -495,6 +491,7 @@ class DirectedPatientExtractor:
         registry_item: dict,
         status: AttributeStatus,
         error: Optional[str] = None,
+        patient_id: Optional[str] = None,
     ) -> ExtractedPatientAttribute:
         canonical_name = self._registry_canonical_name(registry_item)
 
@@ -503,6 +500,7 @@ class DirectedPatientExtractor:
             missing_question = self._generate_missing_question(
                 registry_item=registry_item,
                 status=status,
+                patient_id=patient_id,
                 error=error,
             )
 
@@ -529,6 +527,7 @@ class DirectedPatientExtractor:
         self,
         attribute_registry: dict,
         error: str,
+        patient_id: Optional[str] = None,
     ) -> List[ExtractedPatientAttribute]:
         failed_attributes: List[ExtractedPatientAttribute] = []
 
@@ -537,6 +536,7 @@ class DirectedPatientExtractor:
                 registry_item=registry_item,
                 status="extraction_error",
                 error=error,
+                patient_id=patient_id,
             )
             attr.impact = self._compute_attribute_impact(attr, registry_item)
             failed_attributes.append(attr)
@@ -967,8 +967,11 @@ class DirectedPatientExtractor:
                 for item in self._required_by_from_registry_item(registry_item)
             ],
         }
-
-        result = self.question_generator.generate_question(payload)
+        
+        try:
+            result = self.question_generator.generate_question(payload)
+        except Exception:
+            return None
 
         if not isinstance(result, dict):
             return None
