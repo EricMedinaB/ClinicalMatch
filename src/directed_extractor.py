@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
+
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal, Any, List, Optional, Dict, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -35,13 +36,32 @@ ATTRIBUTE_STATUSES = (
     "extraction_error",
 )
 
+QUESTION_STATUSES = {
+    "not_found",
+    "ambiguous",
+    "conflicting",
+    "outdated",
+    "low_confidence",
+    "extraction_error",
+}
+
+EVIDENCE_REQUIRED_STATUSES = {
+    "found",
+    "negated",
+    "ambiguous",
+    "conflicting",
+    "outdated",
+    "derived",
+    "low_confidence",
+}
+
 
 class EvidenceSpan(BaseModel):
     text: str
     source: str = "raw_text"
     char_start: Optional[int] = None
     char_end: Optional[int] = None
-    confidence: Optional[float] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 class TemporalInfo(BaseModel):
@@ -79,8 +99,8 @@ class ExtractedPatientAttribute(BaseModel):
     attribute_id: str
     canonical_name: str
 
-    value: Optional[str] = None
-    normalized_value: Optional[str] = None
+    value: Any | None = None
+    normalized_value: Any | None = None
     unit: Optional[str] = None
 
     status: AttributeStatus
@@ -201,7 +221,7 @@ class DirectedPatientExtractor:
         prompt_version: str = "directed_patient_extractor_v1",
         prompt_filename: str = "directed_patient_extractor.md",
         schema_version: str = "patient_attribute_set_v1",
-        max_attempts: int = 1,
+        max_attempts: int = 2,
         question_generator: Optional[Any] = None,
     ):
         self.llm_client = llm_client
@@ -221,11 +241,13 @@ class DirectedPatientExtractor:
         self,
         normalized_profile: dict,
         attribute_registry: dict,
-        output_path: Optional[Path] = None,
+        output_path: Optional[Path | str] = None,
     ) -> PatientAttributeSet:
         patient_id = normalized_profile.get("patient_id", "unknown_patient")
         raw_text = normalized_profile.get("raw_text", "")
-        registry_attributes = attribute_registry.get("attributes", [])
+
+        registry_attributes = self._get_registry_attributes(attribute_registry)
+        registry_id = attribute_registry.get("registry_id", self.registry_id)
 
         attempts = 0
 
@@ -235,6 +257,7 @@ class DirectedPatientExtractor:
                     patient_id=patient_id,
                     normalized_profile=normalized_profile,
                     registry_attributes=registry_attributes,
+                    registry_id=registry_id,
                 )
                 self._write_output_if_needed(response_data, output_path)
                 return response_data
@@ -244,6 +267,7 @@ class DirectedPatientExtractor:
                 raw_text=raw_text,
                 normalized_profile=normalized_profile,
                 attribute_registry=attribute_registry,
+                registry_attributes=registry_attributes,
             )
 
             llm_response, attempts = self._run_llm(user_prompt)
@@ -254,7 +278,7 @@ class DirectedPatientExtractor:
                 patient_id=patient_id,
             )
 
-            flags = []
+            flags: List[ExtractionFlag] = []
             flags.extend(llm_response.flags)
             flags.extend(registry_flags)
 
@@ -263,7 +287,7 @@ class DirectedPatientExtractor:
 
             response_data = PatientAttributeSet(
                 patient_id=patient_id,
-                registry_id=self.registry_id,
+                registry_id=registry_id,
                 extraction_status=extraction_status,
                 attributes=attributes,
                 summary=summary,
@@ -286,7 +310,7 @@ class DirectedPatientExtractor:
 
             response_data = PatientAttributeSet(
                 patient_id=patient_id,
-                registry_id=self.registry_id,
+                registry_id=registry_id,
                 extraction_status="failed",
                 attributes=failed_attributes,
                 summary=self._build_summary(failed_attributes),
@@ -308,12 +332,29 @@ class DirectedPatientExtractor:
         self._write_output_if_needed(response_data, output_path)
         return response_data
 
+    def _get_registry_attributes(self, attribute_registry: dict) -> List[dict]:
+        attributes = (
+            attribute_registry.get("attributes")
+            or attribute_registry.get("required_attributes")
+            or attribute_registry.get("registry_attributes")
+            or []
+        )
+
+        if isinstance(attributes, dict):
+            return [attributes]
+
+        if not isinstance(attributes, list):
+            raise ValueError("Attribute Registry attributes must be a list.")
+
+        return attributes
+
     def _build_user_prompt(
         self,
         patient_id: str,
         raw_text: str,
         normalized_profile: dict,
         attribute_registry: dict,
+        registry_attributes: List[dict],
     ) -> str:
         patient_profile = self._get_patient_profile(normalized_profile)
         upstream_metadata = self._get_upstream_metadata(normalized_profile)
@@ -327,23 +368,24 @@ class DirectedPatientExtractor:
             "extraction_status": normalized_profile.get("extraction_status"),
             "extraction_error": normalized_profile.get("extraction_error"),
             "upstream_extractor_metadata": upstream_metadata,
+            "registry_id": attribute_registry.get("registry_id", self.registry_id),
         }
 
         return f"""
-        ID del Paciente: {patient_id}
+ID del Paciente: {patient_id}
 
-        === METADATOS DE ENTRADA ===
-        {json.dumps(input_metadata, indent=2, ensure_ascii=False)}
+=== METADATOS DE ENTRADA ===
+{json.dumps(input_metadata, indent=2, ensure_ascii=False)}
 
-        === TEXTO CLÍNICO ORIGINAL ===
-        {raw_text}
+=== TEXTO CLÍNICO ORIGINAL ===
+{raw_text}
 
-        === PERFIL CLÍNICO ESTRUCTURADO PREVIO ===
-        {json.dumps(patient_profile, indent=2, ensure_ascii=False)}
+=== PERFIL CLÍNICO ESTRUCTURADO PREVIO ===
+{json.dumps(patient_profile, indent=2, ensure_ascii=False)}
 
-        === ATRIBUTOS REQUERIDOS ===
-        {json.dumps(attribute_registry.get('attributes', []), indent=2, ensure_ascii=False)}
-        """
+=== ATRIBUTOS REQUERIDOS ===
+{json.dumps(registry_attributes, indent=2, ensure_ascii=False)}
+""".strip()
 
     def _run_llm(self, user_prompt: str) -> Tuple[LLMExtractionResponse, int]:
         last_error: Optional[Exception] = None
@@ -461,7 +503,10 @@ class DirectedPatientExtractor:
                 registry_item=registry_item,
             )
 
-            if matched_attr.status in {"not_found", "extraction_error"}:
+            matched_attr, quality_flags = self._validate_attribute_quality(matched_attr)
+            flags.extend(quality_flags)
+
+            if matched_attr.status in QUESTION_STATUSES:
                 matched_attr.missing_question = self._generate_missing_question(
                     registry_item=registry_item,
                     status=matched_attr.status,
@@ -486,6 +531,46 @@ class DirectedPatientExtractor:
 
         return final_attributes, flags
 
+    def _validate_attribute_quality(
+        self,
+        attr: ExtractedPatientAttribute,
+    ) -> Tuple[ExtractedPatientAttribute, List[ExtractionFlag]]:
+        flags: List[ExtractionFlag] = []
+
+        if attr.status in EVIDENCE_REQUIRED_STATUSES and not attr.evidence:
+            flags.append(
+                ExtractionFlag(
+                    type="missing_evidence_for_attribute",
+                    severity="medium",
+                    message=(
+                        f"Attribute '{attr.attribute_id}' has status "
+                        f"'{attr.status}' but no evidence."
+                    ),
+                )
+            )
+
+            if attr.status == "found":
+                attr.status = "low_confidence"
+                attr.confidence = min(attr.confidence, 0.49)
+                attr.notes = (
+                    (attr.notes + " " if attr.notes else "")
+                    + "Downgraded because no evidence was provided."
+                )
+
+        if attr.status == "not_found":
+            attr.value = None
+            attr.normalized_value = None
+            attr.evidence = []
+            attr.confidence = 0.0
+            attr.negation = None
+            attr.temporality = None
+            attr.date = None
+
+        if attr.status == "extraction_error" and not attr.error:
+            attr.error = "Unknown extraction error."
+
+        return attr, flags
+
     def _attribute_from_registry_item(
         self,
         registry_item: dict,
@@ -496,7 +581,7 @@ class DirectedPatientExtractor:
         canonical_name = self._registry_canonical_name(registry_item)
 
         missing_question = None
-        if status in {"not_found", "extraction_error"}:
+        if status in QUESTION_STATUSES:
             missing_question = self._generate_missing_question(
                 registry_item=registry_item,
                 status=status,
@@ -530,8 +615,9 @@ class DirectedPatientExtractor:
         patient_id: Optional[str] = None,
     ) -> List[ExtractedPatientAttribute]:
         failed_attributes: List[ExtractedPatientAttribute] = []
+        registry_attributes = self._get_registry_attributes(attribute_registry)
 
-        for registry_item in attribute_registry.get("attributes", []):
+        for registry_item in registry_attributes:
             attr = self._attribute_from_registry_item(
                 registry_item=registry_item,
                 status="extraction_error",
@@ -668,6 +754,7 @@ class DirectedPatientExtractor:
             counts["found"]
             + counts["negated"]
             + counts["derived"]
+            + counts["not_applicable"]
         )
 
         coverage = round(covered / total, 4) if total else 0.0
@@ -730,10 +817,11 @@ class DirectedPatientExtractor:
         patient_id: str,
         normalized_profile: dict,
         registry_attributes: List[dict],
+        registry_id: str,
     ) -> PatientAttributeSet:
         return PatientAttributeSet(
             patient_id=patient_id,
-            registry_id=self.registry_id,
+            registry_id=registry_id,
             extraction_status="completed_with_warnings",
             attributes=[],
             summary=ExtractionSummary(total_attributes=0, coverage=0.0),
@@ -769,19 +857,16 @@ class DirectedPatientExtractor:
             schema_version=self.schema_version,
             attempts=attempts,
             registry_hash=self._stable_hash(registry_attributes),
-
             source_patient_id=normalized_profile.get("source_patient_id"),
             source=normalized_profile.get("source"),
             source_file=normalized_profile.get("source_file"),
             input_format=normalized_profile.get("input_format"),
-
             upstream_module=upstream_metadata.get("module"),
             upstream_model_size=upstream_metadata.get("model_size"),
             upstream_model_name=upstream_metadata.get("model_name"),
             upstream_prompt_version=upstream_metadata.get("prompt_version"),
             upstream_schema_version=upstream_metadata.get("schema_version"),
             upstream_extraction_status=normalized_profile.get("extraction_status"),
-
             error=error,
         )
 
@@ -799,14 +884,15 @@ class DirectedPatientExtractor:
     def _write_output_if_needed(
         self,
         response_data: PatientAttributeSet,
-        output_path: Optional[Path],
+        output_path: Optional[Path | str],
     ) -> None:
         if output_path is None:
             return
 
+        output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, "w", encoding="utf-8") as f:
+        with output_path.open("w", encoding="utf-8") as f:
             f.write(response_data.model_dump_json(indent=2))
 
     def _stable_hash(self, data: Any) -> str:
@@ -907,6 +993,13 @@ class DirectedPatientExtractor:
 
         return self._normalize_keys(candidates)
 
+    def _normalize_key(self, value: Any) -> str:
+        key = str(value).strip().lower()
+        key = key.replace("-", "_")
+        key = key.replace(" ", "_")
+        key = "_".join(part for part in key.split("_") if part)
+        return key
+
     def _normalize_keys(self, values: List[Any]) -> List[str]:
         keys: List[str] = []
 
@@ -914,13 +1007,15 @@ class DirectedPatientExtractor:
             if value is None:
                 continue
 
-            key = str(value).strip().lower()
+            raw_key = str(value).strip().lower()
+            slug_key = self._normalize_key(value)
 
-            if key and key not in keys:
-                keys.append(key)
+            for key in [raw_key, slug_key]:
+                if key and key not in keys:
+                    keys.append(key)
 
         return keys
-    
+
     def _generate_missing_question(
         self,
         registry_item: dict,
@@ -931,7 +1026,7 @@ class DirectedPatientExtractor:
         """
         Delega la generación de preguntas faltantes al módulo MissingInfoQuestionGenerator.
 
-        El método externo esperado es:
+        Método externo esperado:
             generate_question(input_dict: dict) -> dict
 
         Se espera que devuelva algo como:
@@ -956,6 +1051,7 @@ class DirectedPatientExtractor:
                 "canonical_name": self._registry_canonical_name(registry_item),
                 "unit": registry_item.get("unit"),
                 "type": registry_item.get("type"),
+                "value_type": registry_item.get("value_type"),
                 "allowed_values": registry_item.get("allowed_values"),
                 "aliases": registry_item.get("aliases", []),
             },
@@ -967,7 +1063,7 @@ class DirectedPatientExtractor:
                 for item in self._required_by_from_registry_item(registry_item)
             ],
         }
-        
+
         try:
             result = self.question_generator.generate_question(payload)
         except Exception:
