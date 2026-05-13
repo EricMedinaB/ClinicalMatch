@@ -70,10 +70,14 @@ class QuestionManager:
         pdf.set_auto_page_break(auto=True, margin=15)
         
         try:
-            pdf.add_font("Montserrat", style="B", fname="Montserrat-VariableFont_wght.ttf")
-            pdf.add_font("Inter", style="", fname="Inter-VariableFont_opsz,wght.ttf")
-            pdf.add_font("Inter", style="B", fname="Inter-VariableFont_opsz,wght.ttf")
-            pdf.add_font("Inter", style="I", fname="Inter-Italic-VariableFont_opsz,wght.ttf")
+            base_dir = Path(__file__).resolve().parent
+            fonts_dir = base_dir / "fonts"
+
+            pdf.add_font("Montserrat", style="B", fname=str(fonts_dir / "Montserrat-VariableFont_wght.ttf"))
+            pdf.add_font("Inter", style="", fname=str(fonts_dir / "Inter-VariableFont_opsz,wght.ttf"))
+            pdf.add_font("Inter", style="B", fname=str(fonts_dir / "Inter-VariableFont_opsz,wght.ttf"))
+            pdf.add_font("Inter", style="I", fname=str(fonts_dir / "Inter-Italic-VariableFont_opsz,wght.ttf"))
+
             font_title = "Montserrat"
             font_body = "Inter"
         except Exception as e:
