@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 
+#Ejecutar con:
+# pytest tests/tests_unitaris/test_ranking_engine.py -v -s
+
 import json
 import sys
 from pathlib import Path
