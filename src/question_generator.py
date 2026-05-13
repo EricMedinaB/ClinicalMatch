@@ -1,3 +1,5 @@
+from typing import Any, Literal, Optional
+from pydantic import BaseModel, Field
 def generate_question(self, missing_attribute_data: dict) -> dict:
     attribute_data = missing_attribute_data.get("attribute", {})
 
@@ -87,7 +89,6 @@ def _safe_expected_answer_type(self, value: Any) -> Literal["integer", "float", 
     if value in valid_types:
         return value
 
-    # Mapeos frecuentes desde Attribute Registry
     mapping = {
         "int": "integer",
         "number": "float",
