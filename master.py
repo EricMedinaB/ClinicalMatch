@@ -11,6 +11,10 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 
+# -----------------------------------------------------------------------------
+# Paths
+# -----------------------------------------------------------------------------
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_PATH = PROJECT_ROOT / "src"
 DATA_PATH = PROJECT_ROOT / "data"
@@ -33,8 +37,16 @@ if str(METRICS_PATH) not in sys.path:
     sys.path.insert(0, str(METRICS_PATH))
 
 
+# -----------------------------------------------------------------------------
+# Environment
+# -----------------------------------------------------------------------------
+
 load_dotenv(PROJECT_ROOT / ".env")
 
+
+# -----------------------------------------------------------------------------
+# Imports internos
+# -----------------------------------------------------------------------------
 
 from src.LLM.LLM_factory import LLMSize, create_llm
 
@@ -44,7 +56,9 @@ from trial_candidate_store import TrialCandidateStore
 from attribute_registry import AttributeRegistryBuilder
 from directed_extractor import DirectedPatientExtractor
 from criterion_evaluator import CriterionEvaluator
+
 import question_generator
+
 from question_manager import QuestionManager
 from ranking_engine import RankingEngine
 from dossier_generator import DossierGenerator
@@ -61,6 +75,10 @@ try:
 except ImportError:
     PatientExtractor = None
 
+
+# -----------------------------------------------------------------------------
+# Compatibilidad Question Generator
+# -----------------------------------------------------------------------------
 
 class MissingQuestion(BaseModel):
     attribute: str
@@ -93,12 +111,28 @@ class InternalRunnerGen:
         return question_generator._safe_expected_answer_type(self, v)
 
 
+# -----------------------------------------------------------------------------
+# Master
+# -----------------------------------------------------------------------------
+
 class ClinicalMatchMaster:
     def __init__(
         self,
         generate_dossiers: bool = False,
+        trec_year: int | None = None,
     ) -> None:
+        """
+        Args:
+            generate_dossiers:
+                Si True, genera los dossiers PDF finales por paciente.
+
+            trec_year:
+                None -> modo normal/live ClinicalTrials.gov
+                2021 o 21 -> modo TREC 2021
+                2022 o 22 -> modo TREC 2022
+        """
         self.generate_dossiers = generate_dossiers
+        self.trec_year = self._normalize_trec_year(trec_year)
 
         self.project_root = PROJECT_ROOT
         self.src_path = SRC_PATH
@@ -132,8 +166,40 @@ class ClinicalMatchMaster:
             for char in str(value)
         )
 
+    def _normalize_trec_year(
+        self,
+        trec_year: int | None,
+    ) -> int | None:
+        if trec_year is None:
+            return None
+
+        if trec_year in {21, 2021}:
+            return 2021
+
+        if trec_year in {22, 2022}:
+            return 2022
+
+        raise ValueError("trec_year debe ser None, 21, 22, 2021 o 2022")
+
+    def build_clinical_trials_client(self) -> ClinicalTrialsClient:
+        """
+        Crea el cliente de ClinicalTrials según el modo de ejecución.
+
+        - trec_year=None -> API live
+        - trec_year=2021/2022 -> snapshot TREC local
+        """
+        if self.trec_year is None:
+            return ClinicalTrialsClient(
+                mode="live",
+            )
+
+        return ClinicalTrialsClient(
+            mode="trec",
+            trec_year=self.trec_year,
+        )
+
     # ------------------------------------------------------------------
-    # Módulo específico para dossier
+    # Dossier opcional
     # ------------------------------------------------------------------
 
     def generate_patient_dossier(
@@ -194,6 +260,11 @@ class ClinicalMatchMaster:
             folder.mkdir(parents=True, exist_ok=True)
 
         print(f" BATCH #{batch_num} | Archivos XML detectados: {len(xml_files)}")
+
+        if self.trec_year is None:
+            print(" Modo ClinicalTrials: live")
+        else:
+            print(f" Modo ClinicalTrials: TREC {self.trec_year}")
 
         # ------------------------------------------------------------------
         # [M1] InputAdapter
@@ -262,6 +333,9 @@ class ClinicalMatchMaster:
             print(f"    [M2] Extrayendo perfil médico de Topic {source_patient_id}...")
 
             try:
+                if PatientExtractor is None:
+                    raise ImportError("No se ha podido importar PatientExtractor")
+
                 extractor = PatientExtractor()
 
                 profile_data = extractor.extract(
@@ -320,7 +394,7 @@ class ClinicalMatchMaster:
 
             raw_api = patient_folder / "raw_api_data.json"
 
-            ClinicalTrialsClient().search_from_plan(
+            self.build_clinical_trials_client().search_from_plan(
                 q_plan,
                 output_path=raw_api,
             )
@@ -614,6 +688,9 @@ class ClinicalMatchMaster:
         )
 
         try:
+            if PredictionExporter is None:
+                raise ImportError("No se ha podido importar PredictionExporter")
+
             exporter = PredictionExporter(run_name=f"BATCH{batch_num}")
 
             json_submission = batch_output_folder / f"Batch{batch_num}_Predictions.json"
@@ -702,5 +779,6 @@ class ClinicalMatchMaster:
 if __name__ == "__main__":
     master = ClinicalMatchMaster(
         generate_dossiers=False,
+        trec_year=None,  # None = live | 2021/21 = TREC 2021 | 2022/22 = TREC 2022
     )
     master.run()
