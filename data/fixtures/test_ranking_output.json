@@ -1,0 +1,86 @@
+{
+  "patient_id": "patient_3",
+  "ranking_status": "completed",
+  "ranked_trials": [
+    {
+      "rank": 1,
+      "trial_id": "NCT01234567",
+      "nct_id": "NCT01234567",
+      "score": 87.4,
+      "score_breakdown": {
+        "base_score": 83.2,
+        "penalty_multiplier": 0.95,
+        "bonus_multiplier": 1.06,
+        "final_score": 83.8
+      },
+      "summary": {
+        "total_criteria": 12,
+        "met": 7,
+        "not_met": 1,
+        "unknown": 4,
+        "blocking_criteria": 0,
+        "unknown_critical_criteria": 2
+      },
+      "reasons": [
+        "Strong match on disease status and biomarker criteria.",
+        "No hard exclusion criteria triggered.",
+        "Some hard criteria remain unknown."
+      ],
+      "trial": {
+        "brief_title": "Study of Targeted Therapy in Advanced NSCLC",
+        "official_title": "A Phase 2 Study of Targeted Therapy in Patients With Advanced Non-Small Cell Lung Cancer",
+        "phase": "PHASE2",
+        "overall_status": "RECRUITING",
+        "conditions": [
+          "Non-Small Cell Lung Cancer"
+        ],
+        "locations": [
+          "Barcelona, Spain",
+          "Madrid, Spain"
+        ]
+      }
+    },
+    {
+      "rank": 2,
+      "trial_id": "NCT07654321",
+      "nct_id": "NCT07654321",
+      "score": 72.1,
+      "score_breakdown": {
+        "base_score": 76.0,
+        "penalty_multiplier": 0.90,
+        "bonus_multiplier": 1.00,
+        "final_score": 68.4
+      },
+      "summary": {
+        "total_criteria": 10,
+        "met": 5,
+        "not_met": 2,
+        "unknown": 3,
+        "blocking_criteria": 1,
+        "unknown_critical_criteria": 1
+      },
+      "reasons": [
+        "Relevant disease match.",
+        "One blocking criterion was detected.",
+        "Some relevant information is missing."
+      ],
+      "trial": {
+        "brief_title": "Immunotherapy Trial in Lung Cancer",
+        "official_title": "A Study of Immunotherapy in Patients With Lung Cancer",
+        "phase": "PHASE1",
+        "overall_status": "RECRUITING",
+        "conditions": [
+          "Lung Cancer"
+        ],
+        "locations": [
+          "Valencia, Spain"
+        ]
+      }
+    }
+  ],
+  "ranking_summary": {
+    "total_ranked_trials": 2,
+    "top_score": 87.4,
+    "notes": "Ranking generated with provisional scoring."
+  }
+}
