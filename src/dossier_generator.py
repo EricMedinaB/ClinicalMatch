@@ -358,6 +358,14 @@ class DossierGenerator:
         if not isinstance(locations, list):
             locations = [locations]
 
+        conditions_str = ", ".join([str(item) for item in conditions]) if conditions else "-"
+        if len(conditions_str) > 120:
+            conditions_str = conditions_str[:117] + "..."
+
+        locations_str = ", ".join([str(item) for item in locations]) if locations else "-"
+        if len(locations_str) > 120:
+            locations_str = locations_str[:117] + "..."
+
         rows = [
             ["Rank", ranked_trial.get("rank", "-")],
             [
@@ -379,14 +387,8 @@ class DossierGenerator:
                 or self._get_nested_value(trial, ["statusModule", "overallStatus"])
                 or "-",
             ],
-            [
-                "Conditions",
-                ", ".join([str(item) for item in conditions]) if conditions else "-",
-            ],
-            [
-                "Locations",
-                ", ".join([str(item) for item in locations]) if locations else "-",
-            ],
+            ["Conditions", conditions_str],
+            ["Locations", locations_str],
         ]
 
         story.append(Paragraph("Trial identification", self.section_style))
