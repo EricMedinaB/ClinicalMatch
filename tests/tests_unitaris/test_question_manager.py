@@ -1,8 +1,29 @@
 import json
+import sys
 from pathlib import Path
 from question_manager import QuestionManager
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_PATH = PROJECT_ROOT / "src"
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
+
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / ".env")
+
+
 
 def run_tests():
+    project_root = PROJECT_ROOT
+    
+    output_dir = project_root / "data" / "patient_questions"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    json_path = output_dir / "paciente_1_preguntas.json"
+    pdf_path = output_dir / "paciente_1_formulario.pdf"
+
     print("Iniciando pruebas del Módulo 13 (Gestor de Preguntas y PDF)...")
 
     original_attributes = [
@@ -19,7 +40,7 @@ def run_tests():
     generated_questions = [
         {
             "attribute": "ECOG Performance Status",
-            "question": "Considerando que el paciente pasa más del 50% del día en cama, ¿podría confirmar si su estado funcional corresponde a un ECOG 3 o 4?",
+            "question": "Considerando que el paciente pasa más del 50% del día en cama, ¿podría confirmar si su estado funcional corresponds a un ECOG 3 o 4?",
             "expected_answer_type": "integer",
             "valid_answers": [0, 1, 2, 3, 4],
             "resolves_criteria": ["C1"]
@@ -33,24 +54,31 @@ def run_tests():
         }
     ]
 
+
     manager = QuestionManager()
     
-    print("\nUnificando preguntas y calculando impacto...")
+    print("\n Unificando preguntas y calculando impacto de negocio...")
     patient_json = manager.unify_patient_questions(
         patient_id="TREC_TOPIC_1", 
         generated_questions=generated_questions, 
         original_attributes=original_attributes
     )
 
-    json_path = "outputs/tests/paciente_1_preguntas.json"
-    Path(json_path).parent.mkdir(parents=True, exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(patient_json, f, indent=2, ensure_ascii=False)
-    print(f"JSON unificado guardado en: {json_path}")
+    print(f"   JSON unificado guardado en: {json_path}")
 
-    pdf_path = "outputs/tests/paciente_1_formulario.pdf"
     manager.export_to_pdf(patient_json, pdf_path)
-    print(f"PDF generado guardado en: {pdf_path}")
+    print(f"   PDF generado guardado en: {pdf_path}")
+
+    print("\n" + "="*50)
+    print(" RESULTADOS DE LA PRUEBA (MÓDULO 13)")
+    print("="*50)
+    print(f" Status del proceso: ÉXITO")
+    print(f" Total preguntas gestionadas: {patient_json.get('total_questions', 0)}")
+    print("-" * 50)
+    print(f" Todo se ha centralizado correctamente en:\n  ↳ {output_dir}")
+    print("="*50)
 
 if __name__ == "__main__":
     run_tests()
