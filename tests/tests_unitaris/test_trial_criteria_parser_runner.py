@@ -1,3 +1,6 @@
+# Para ejecutar el test se debe ejecutar en el terminal:
+# python tests/tests_unitaris/test_trial_criteria_parser_runner.py --max-studies 2
+
 """
 Runner real para TrialCriteriaParser.
 
@@ -8,23 +11,24 @@ Salida:
     data/parsed_trial_criteria/trial_candidates_with_criteria_real.json
 
 Ejecución directa:
-    python test/test_trial_criteria_parser_real.py
+    python tests/test_trial_criteria_parser_runner.py
 
 Ejecución con pytest:
-    pytest test/test_trial_criteria_parser_real.py -s
+    pytest tests/test_trial_criteria_parser_runner.py -s
 
 Opcionalmente puedes limitar el número de estudios para no gastar tantos tokens:
 
-    python test/test_trial_criteria_parser_real.py --max-studies 3
+    python tests/test_trial_criteria_parser_runner.py --max-studies 3
 
 o:
 
-    TRIAL_CRITERIA_MAX_STUDIES=3 python test/test_trial_criteria_parser_real.py
+    TRIAL_CRITERIA_MAX_STUDIES=3 python tests/test_trial_criteria_parser_runner.py
 """
 
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -36,7 +40,7 @@ from typing import Any
 # Paths
 # ---------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = PROJECT_ROOT / "src"
 
 if str(SRC_DIR) not in sys.path:
@@ -180,6 +184,43 @@ def save_json(data: dict[str, Any], path: Path) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def build_parser_config() -> TrialCriteriaParserConfig:
+    """
+    Construye config sin asumir campos que quizá hayas eliminado.
+
+    Si TrialCriteriaParserConfig tiene enable_hardness_llm, lo desactiva.
+    Si no lo tiene, no lo pasa.
+    """
+    config_fields = getattr(TrialCriteriaParserConfig, "model_fields", {})
+
+    kwargs: dict[str, Any] = {}
+
+    if "enable_hardness_llm" in config_fields:
+        kwargs["enable_hardness_llm"] = False
+
+    return TrialCriteriaParserConfig(**kwargs)
+
+
+def build_parser(config: TrialCriteriaParserConfig) -> TrialCriteriaParser:
+    """
+    Construye el parser sin pasar argumentos que quizá hayas eliminado
+    del constructor, como cache.
+    """
+    signature = inspect.signature(TrialCriteriaParser)
+
+    kwargs: dict[str, Any] = {
+        "config": config,
+    }
+
+    if "logger" in signature.parameters:
+        kwargs["logger"] = None
+
+    if "normalizer" in signature.parameters:
+        kwargs["normalizer"] = None
+
+    return TrialCriteriaParser(**kwargs)
+
+
 # ---------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------
@@ -191,19 +232,8 @@ def run_trial_criteria_parser_real(
     candidate_json = load_input_json(INPUT_PATH)
     candidate_json = maybe_limit_studies(candidate_json, max_studies)
 
-    config = TrialCriteriaParserConfig(
-        enable_cache=False,
-        enable_hardness_llm=False,
-    )
-
-    parser = TrialCriteriaParser(
-        config=config,
-        # No pasamos inclusion_llm/exclusion_llm/hardness_llm.
-        # Así se crean usando LLM_factory.create_llm(...)
-        cache=None,
-        logger=None,
-        normalizer=None,
-    )
+    config = build_parser_config()
+    parser = build_parser(config)
 
     parsed_json = parser.parse_patient_candidate_file(candidate_json)
 
