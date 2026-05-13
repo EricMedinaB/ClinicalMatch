@@ -1,3 +1,5 @@
+import re
+
 from pydantic import BaseModel, Field
 
 from LLM.LLM_factory import LLMSize, create_llm
@@ -31,14 +33,30 @@ class MeshDisambiguationResult(BaseModel):
 
 
 class ClinicalNormalizer:
-    def __init__(self):
-        self.mesh_client = MeshClient()
-        self.llm = create_llm(LLMSize.SMALL)
-        self.llm_confidence_threshold = 0.75
+    def __init__(
+        self,
+        use_mesh_api: bool = True,
+        use_llm_disambiguation: bool = True,
+    ):
+        self.use_mesh_api = use_mesh_api
+        self.use_llm_disambiguation = use_llm_disambiguation
 
-    # Funcion para quitar espacios al principio/final y pasar a minusculas
+        self.mesh_client = MeshClient()
+        self.llm = None
+
+        self.llm_confidence_threshold = 0.75
+        self.mesh_cache = {}
+
+    # Funcion para quitar espacios al principio/final, normalizar espacios internos y pasar a minusculas
     def clean_text(self, text):
-        return str(text).strip().lower()
+        return re.sub(r"\s+", " ", str(text).strip().lower())
+
+    # Creamos el LLM solo cuando hace falta
+    def _get_llm(self):
+        if self.llm is None:
+            self.llm = create_llm(LLMSize.SMALL)
+
+        return self.llm
 
     def normalize_condition(self, text, raw_text=None):
         if text is None:
@@ -101,11 +119,29 @@ class ClinicalNormalizer:
         if fallback_normalized is None:
             fallback_normalized = search_text
 
+        # Si MeSH API esta desactivada, no hacemos llamadas externas
+        if not self.use_mesh_api:
+            return NormalizedConcept(
+                raw=original_text,
+                normalized=fallback_normalized,
+                concept_type="condition",
+                method=fallback_method,
+                confidence=fallback_confidence,
+                status="no_match",
+            )
+
+        cache_key = self.clean_text(search_text)
+
+        # Si ya hemos consultado este termino antes, usamos cache
+        if cache_key in self.mesh_cache:
+            cached_result = self.mesh_cache[cache_key]
+            return cached_result.model_copy(update={"raw": original_text})
+
         try:
             mesh_result = self.mesh_client.find_best_descriptor(search_text)
 
             if mesh_result["status"] in {"normalized", "low_confidence"}:
-                return NormalizedConcept(
+                result = NormalizedConcept(
                     raw=original_text,
                     normalized=mesh_result["mesh_term"],
                     concept_type="condition",
@@ -119,11 +155,14 @@ class ClinicalNormalizer:
                     parents=[],
                 )
 
+                self.mesh_cache[cache_key] = result
+                return result
+
             if mesh_result["status"] == "multiple_candidates":
                 candidates = mesh_result.get("candidates", [])
 
-                # Si hay raw_text, usamos Gemini para elegir entre candidatos reales de MeSH
-                if raw_text:
+                # Si hay raw_text y esta permitido, usamos Gemini para elegir entre candidatos reales de MeSH
+                if raw_text and self.use_llm_disambiguation:
                     llm_result = self._disambiguate_mesh_candidates_with_llm(
                         ambiguous_term=original_text,
                         raw_text=raw_text,
@@ -139,7 +178,7 @@ class ClinicalNormalizer:
                             candidates=candidates,
                         )
                     ):
-                        return NormalizedConcept(
+                        result = NormalizedConcept(
                             raw=original_text,
                             normalized=llm_result.selected_mesh_term,
                             concept_type="condition",
@@ -153,6 +192,9 @@ class ClinicalNormalizer:
                             parents=[],
                         )
 
+                        self.mesh_cache[cache_key] = result
+                        return result
+
                     return NormalizedConcept(
                         raw=original_text,
                         normalized=fallback_normalized,
@@ -165,8 +207,8 @@ class ClinicalNormalizer:
                         parents=[],
                     )
 
-                # Si no hay raw_text, no podemos desambiguar con contexto
-                return NormalizedConcept(
+                # Si no hay raw_text o el LLM esta desactivado, no podemos desambiguar con contexto
+                result = NormalizedConcept(
                     raw=original_text,
                     normalized=fallback_normalized,
                     concept_type="condition",
@@ -178,8 +220,11 @@ class ClinicalNormalizer:
                     parents=[],
                 )
 
+                self.mesh_cache[cache_key] = result
+                return result
+
             if mesh_result["status"] == "no_match":
-                return NormalizedConcept(
+                result = NormalizedConcept(
                     raw=original_text,
                     normalized=fallback_normalized,
                     concept_type="condition",
@@ -190,6 +235,9 @@ class ClinicalNormalizer:
                     aliases=[],
                     parents=[],
                 )
+
+                self.mesh_cache[cache_key] = result
+                return result
 
         except Exception:
             return NormalizedConcept(
@@ -222,7 +270,7 @@ class ClinicalNormalizer:
             candidates=candidates,
         )
 
-        return self.llm.generate_json(
+        return self._get_llm().generate_json(
             prompt=prompt,
             response_schema=MeshDisambiguationResult,
             system_instruction=load_prompt("mesh_disambiguation.md"),
@@ -341,19 +389,99 @@ If none is clearly supported, return selected_mesh_id = null and selected_mesh_t
             confidence=0.2,
         )
 
+    def normalize_value(self, attribute_id, value):
+        if value is None:
+            return NormalizedValue(
+                raw=value,
+                normalized=None,
+                value_type="unknown",
+                method="missing",
+                confidence=0.0,
+            )
+
+        attribute_id_clean = self.clean_text(attribute_id)
+
+        if attribute_id_clean == "sex":
+            return self.normalize_sex(value)
+
+        if attribute_id_clean.endswith("_status"):
+            return self.normalize_status(value)
+
+        if isinstance(value, bool):
+            return NormalizedValue(
+                raw=value,
+                normalized=value,
+                value_type="boolean",
+                method="already_boolean",
+                confidence=1.0,
+            )
+
+        if isinstance(value, int):
+            return NormalizedValue(
+                raw=value,
+                normalized=value,
+                value_type="integer",
+                method="already_integer",
+                confidence=1.0,
+            )
+
+        if isinstance(value, float):
+            return NormalizedValue(
+                raw=value,
+                normalized=value,
+                value_type="float",
+                method="already_float",
+                confidence=1.0,
+            )
+
+        value_str = str(value).strip()
+
+        try:
+            number = float(value_str)
+
+            if number.is_integer():
+                number = int(number)
+
+            return NormalizedValue(
+                raw=value,
+                normalized=number,
+                value_type="number",
+                method="numeric_string",
+                confidence=1.0,
+            )
+
+        except ValueError:
+            pass
+
+        return NormalizedValue(
+            raw=value,
+            normalized=value_str,
+            value_type="string",
+            method="not_normalized",
+            confidence=0.4,
+        )
+
     def normalize_biomarker_text(self, text):
         if text is None:
             return None
 
         cleaned = self.clean_text(text)
 
-        biomarkers = ["EGFR", "ALK", "BRAF", "KRAS", "HER2", "ROS1", "PD-L1"]
+        biomarker_patterns = {
+            "EGFR": ["egfr"],
+            "ALK": ["alk"],
+            "BRAF": ["braf"],
+            "KRAS": ["kras"],
+            "HER2": ["her2"],
+            "ROS1": ["ros1"],
+            "PD-L1": ["pd-l1", "pdl1", "pd l1"],
+        }
 
         biomarker = None
 
-        for item in biomarkers:
-            if item.lower() in cleaned:
-                biomarker = item
+        for canonical_biomarker, aliases in biomarker_patterns.items():
+            if any(alias in cleaned for alias in aliases):
+                biomarker = canonical_biomarker
                 break
 
         if biomarker is None:
@@ -382,6 +510,8 @@ If none is clearly supported, return selected_mesh_id = null and selected_mesh_t
             "rearranged",
             "amplified",
             "fusion",
+            "high",
+            "overexpressed",
         ]
 
         if cleaned.endswith("-") or any(marker in cleaned for marker in negative_markers):
