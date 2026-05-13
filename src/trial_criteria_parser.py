@@ -509,6 +509,7 @@ class TrialCriteriaParser:
         unique_studies: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         parsed_studies: list[dict[str, Any]] = []
+        total_ensayos = len(unique_studies)
 
         for index, study in enumerate(unique_studies):
             if not isinstance(study, dict):
@@ -520,7 +521,12 @@ class TrialCriteriaParser:
                 )
                 continue
 
+            nct_id = study.get("nct_id") or study.get("trial", {}).get("nct_id") or "Desconocido"
+            print(f"      ⏳ [M8-LLM] Parseando ensayo {index + 1}/{total_ensayos} ({nct_id})...")
+
             parsed_studies.append(self.parse_trial(study))
+
+
 
         return parsed_studies
 
