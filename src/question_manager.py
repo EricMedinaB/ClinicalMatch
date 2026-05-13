@@ -81,7 +81,6 @@ class QuestionManager:
             font_title = "Montserrat"
             font_body = "Inter"
         except Exception as e:
-            print(f" Aviso: No se pudieron cargar las fuentes ({e}). Usando Helvetica.")
             font_title = "Helvetica"
             font_body = "Helvetica"
 
