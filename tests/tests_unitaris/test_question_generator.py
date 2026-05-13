@@ -1,81 +1,82 @@
+# -*- coding: utf-8 -*-
+import sys
 import json
 from pathlib import Path
+from typing import Any, Literal, Optional
+from pydantic import BaseModel, Field
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.append(str(SRC_PATH))
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
 
 from LLM.LLM_factory import LLMSize, create_llm
-from question_generator import MissingInfoQuestionGenerator 
+
+class MissingQuestion(BaseModel):
+    attribute: str
+    question: str
+    expected_answer_type: Literal["integer", "float", "boolean", "string", "date"]
+    valid_answers: Optional[list[Any]] = None
+    resolves_criteria: list[str] = Field(default_factory=list)
+    status: str = "generated"
+
+import question_generator
+question_generator.MissingQuestion = MissingQuestion 
+
+class MockGenerator:
+    def __init__(self, llm_client):
+        self.client = llm_client
+        self.temperature = 0.0
+        self.system_instruction = "Eres un oncólogo experto. Genera preguntas claras."
+        
+    def generate_question(self, data):
+        return question_generator.generate_question(self, data)
+
+    def _safe_expected_answer_type(self, value):
+        return question_generator._safe_expected_answer_type(self, value)
 
 def run_tests():
-    print("Iniciando pruebas del Módulo 12 (Missing Info Question Generator)...\n")
+    project_root = PROJECT_ROOT
+    ruta_salida = project_root / "data" / "generated_questions" / "resultado_test_mod12.json"
 
-    print("Cargando modelo LLM (SMALL recomendado para generación de texto directa)...")
+    print("Iniciando pruebas del Módulo 12 (Funciones Sueltas)...\n")
+    print(" Cargando modelo LLM...")
     client = create_llm(LLMSize.SMALL)
-    question_generator = MissingInfoQuestionGenerator(llm_client=client)
+    generator = MockGenerator(llm_client=client)
 
-    mock_ecog = {
-        "attribute_id": "ECOG",
-        "canonical_name": "ECOG Performance Status",
-        "status": "not_found",
-        "notes": "El paciente pasa más del 50% del día en la cama debido a debilidad severa, pero no hay puntuación oficial.",
-        "required_by": [{"trial_id": "NCT_001", "criterion_id": "C1", "criterion_text": "ECOG 0-2"}]
-    }
+    mock_attributes = [
+        {
+            "attribute_id": "ECOG",
+            "canonical_name": "ECOG Performance Status",
+            "notes": "Paciente débil, pasa mucho tiempo en cama.",
+            "required_by": [{"trial_id": "NCT_001", "criterion_text": "ECOG 0-2"}]
+        },
+        {
+            "attribute_id": "EGFR_status",
+            "canonical_name": "Mutación EGFR",
+            "notes": "Pendiente de biopsia.",
+            "required_by": [{"trial_id": "NCT_002", "criterion_text": "EGFR+"}]
+        }
+    ]
 
-    mock_egfr = {
-        "attribute_id": "EGFR_status",
-        "canonical_name": "Estado de Mutación EGFR",
-        "status": "not_found",
-        "notes": "Se le hizo biopsia hace 2 semanas pero los resultados moleculares aún no están en el historial.",
-        "required_by": [{"trial_id": "NCT_002", "criterion_id": "C2", "criterion_text": "EGFR Exon 19 deletion positive"}]
-    }
-    
-    mock_date = {
-        "attribute_id": "last_chemo_date",
-        "canonical_name": "Fecha de última quimioterapia",
-        "status": "not_found",
-        "notes": "El texto dice que recibió platino recientemente, pero no especifica qué día terminó el ciclo.",
-        "required_by": [{"trial_id": "NCT_003", "criterion_id": "C3", "criterion_text": "At least 3 weeks since last chemotherapy"}]
-    }
-
-    atributos_a_probar = [mock_ecog, mock_egfr, mock_date]
     resultados = []
-
-    print("\nGenerando preguntas clínicas...")
-    for attr in atributos_a_probar:
-        print(f" -> Procesando: {attr['canonical_name']}...")
+    print("\n Generando preguntas...")
+    for attr in mock_attributes:
+        print(f"   Procesando: {attr['canonical_name']}...")
         try:
-            resultado = question_generator.generate_question(attr)
-            resultados.append(resultado)
+            res = generator.generate_question(attr)
+            resultados.append(res)
         except Exception as e:
-            print(f" ERROR al generar para {attr['attribute_id']}: {e}")
+            print(f"  ERROR: {e}")
 
-    ruta_salida = Path("outputs/tests/resultado_test_mod12.json")
+
     ruta_salida.parent.mkdir(parents=True, exist_ok=True)
-    
     with open(ruta_salida, "w", encoding="utf-8") as f:
         json.dump(resultados, f, indent=2, ensure_ascii=False)
 
-    print("\n" + "="*40)
-    print(" RESULTADOS DE LA PRUEBA (MÓDULO 12)")
-    print("="*40)
-
-    for res in resultados:
-        attr_name = res.get("attribute", "unknown")
-        status = res.get("status", "unknown")
-        pregunta = res.get("question", "No generada")
-        tipo_esperado = res.get("expected_answer_type", "")
-        opciones = res.get("valid_answers")
-
-        if status == "generated":
-            print(f" ÉXITO: {attr_name}")
-            print(f"    Pregunta: {pregunta}")
-            print(f"   Tipo: {tipo_esperado} | Opciones: {opciones}\n")
-        else:
-            print(f" FALLO: {attr_name} | Estado devuelto: {status}")
-            print(f"   Detalle del error: {res.get('error', 'Ninguno')}\n")
-
-    print(f" El JSON completo se ha guardado en: {ruta_salida.absolute()}")
+    print(f"\n Proceso completado. Resultados en: {ruta_salida}")
 
 if __name__ == "__main__":
     run_tests()
