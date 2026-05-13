@@ -6,7 +6,7 @@ SRC_PATH = PROJECT_ROOT / "src"
 
 sys.path.append(str(SRC_PATH))
 
-from trial_candidate_store import TrialCandidateStore
+from src.trial_candidate_store import TrialCandidateStore
 
 
 def main() -> None:

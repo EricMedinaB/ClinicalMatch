@@ -6,9 +6,7 @@ from pathlib import Path
 
 # ==========================================
 # OPCIÓN NUCLEAR: INYECTAR VARIABLES DIRECTAMENTE
-# ==========================================
-# Pon aquí tu clave real (la que sacaste de Google AI Studio)
-os.environ["GEMINI_API_KEY"] = "AIzaSyBmRJJGaCBsDd-nVnp5R-sCgYhddqXhR8E" 
+# ==========================================q 
 
 # Ponemos el modelo que pide vuestra factoría
 os.environ["GEMINI_FLASH_MODEL"] = "gemini-3-flash-preview"
@@ -17,8 +15,8 @@ os.environ["GEMINI_FLASH_LITE_MODEL"] = "gemini-3.1-flash-lite-preview"
 # ==========================================
 # AHORA SÍ, IMPORTAMOS LA IA Y TU CÓDIGO
 # ==========================================
-from LLM.LLM_factory import LLMSize, create_llm
-from directed_extractor import DirectedPatientExtractor
+from src.LLM.LLM_factory import LLMSize, create_llm
+from src.directed_extractor import DirectedPatientExtractor
 
 def run_tests():
     print("Iniciando pruebas del Módulo 10 (Directed Patient Extractor)...\n")
