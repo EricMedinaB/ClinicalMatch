@@ -947,16 +947,282 @@ Si el archivo qrels existe, el módulo de métricas intentará calcular automát
 
 ## Resultados obtenidos
 
-> Pendiente de completar.
+Se ejecutó una primera evaluación del sistema sobre un batch inicial formado por 3 pacientes/topics.  
+La ejecución generó correctamente las predicciones finales en formato JSON y en formato TREC Run.
 
-En este apartado se incluirán:
+### Resumen de la ejecución
 
-* Número de pacientes procesados.
-* Número medio de ensayos recuperados.
-* Número de ensayos rankeados.
-* Ejemplos de predicciones finales.
-* Métricas obtenidas en el benchmark, si están disponibles.
-* Análisis cualitativo de errores.
+| Métrica | Valor |
+|---|---:|
+| Total de topics procesados | 3 |
+| Total de predicciones generadas | 140 |
+| Archivos de ranking válidos | 3 |
+| Archivos de ranking inválidos | 0 |
+| Topics sin predicciones | 0 |
+| Trials duplicados eliminados | 0 |
+| Trials inválidos eliminados | 0 |
+
+La exportación finalizó correctamente con estado `completed`, generando predicciones para los tres topics evaluados.
+
+---
+
+### Métricas globales
+
+| Métrica | Valor |
+|---|---:|
+| Recall@20 | 0.060 |
+| NDCG@10 | 0.482 |
+| Micro-F1 | No disponible |
+
+El valor de **Recall@20 = 0.060** indica que el sistema recupera aproximadamente un 6% de los ensayos relevantes dentro de los primeros 20 resultados. Este valor es bajo, por lo que la principal limitación detectada está en la fase de recuperación inicial de candidatos.
+
+El valor de **NDCG@10 = 0.482** es moderado. Esto indica que, cuando el sistema consigue recuperar ensayos potencialmente relevantes, el ranking tiene cierta capacidad para ordenar los resultados útiles en posiciones altas.
+
+La métrica **Micro-F1** no se ha calculado porque todavía no se dispone de etiquetas gold a nivel de criterio de inclusión/exclusión. Por tanto, en esta fase solo se evalúa recuperación y ranking, no la evaluación criterio a criterio.
+
+---
+
+### Consideraciones sobre el tamaño de la evaluación
+
+Los resultados deben interpretarse como una evaluación preliminar, ya que el batch inicial solo incluye 3 pacientes/topics. Debido al tamaño reducido de la muestra, las métricas pueden variar mucho entre pacientes y no representan todavía el rendimiento general del sistema.
+
+Aunque el **Recall@20 global es bajo**, este resultado no debe interpretarse como una conclusión definitiva, sino como una primera baseline sobre la que comparar futuras mejoras. Además, el **NDCG@10 de 0.482** muestra que el sistema tiene cierta capacidad para ordenar ensayos relevantes cuando estos han sido recuperados previamente.
+
+Por tanto, esta primera ejecución demuestra principalmente que el pipeline completo funciona de extremo a extremo y que genera salidas evaluables. La prioridad en futuras iteraciones será ejecutar el sistema sobre un número mayor de pacientes y mejorar la recuperación inicial de candidatos para aumentar el Recall@20.
+
+---
+
+### Métricas por paciente
+
+| Patient ID | Ensayos predichos | Ensayos relevantes | Recall@20 | NDCG@10 |
+|---|---:|---:|---:|---:|
+| 1 | 58 | 169 | 0.071 | 0.467 |
+| 2 | 43 | 270 | 0.048 | 0.716 |
+| 3 | 39 | 84 | 0.060 | 0.263 |
+
+El paciente 2 obtiene el mejor resultado de ranking, con un **NDCG@10 de 0.716**, lo que indica que los ensayos relevantes recuperados aparecen relativamente bien posicionados en el Top 10.
+
+El paciente 3 presenta el peor resultado de ranking, con un **NDCG@10 de 0.263**, lo que sugiere que, aunque se recuperan algunos ensayos relevantes, estos no quedan tan bien ordenados.
+
+---
+
+### Interpretación de resultados
+
+Los resultados muestran que el sistema es capaz de ejecutar el pipeline completo y generar una salida evaluable. Sin embargo, el bajo Recall@20 indica que todavía se están perdiendo muchos ensayos relevantes en la fase de recuperación.
+
+Esto apunta a que el principal cuello de botella está en los módulos de:
+
+- `Patient Extractor`
+- `Normalization`
+- `Query Planner`
+- `ClinicalTrials Client`
+- `Query Refinement`
+
+Es decir, antes de mejorar mucho más el ranking, es necesario mejorar la recuperación de candidatos. Si un ensayo relevante no entra en la lista inicial, el `Ranking Engine` ya no puede colocarlo en una buena posición.
+
+---
+
+### Análisis cualitativo
+
+El sistema funciona correctamente como pipeline batch:
+
+1. Lee los pacientes de entrada.
+2. Extrae información clínica.
+3. Genera queries.
+4. Recupera ensayos candidatos.
+5. Calcula scores.
+6. Ordena resultados.
+7. Exporta predicciones en JSON y formato TREC.
+
+Sin embargo, las métricas indican que el sistema todavía necesita mejorar la cobertura de búsqueda. Las queries generadas pueden ser demasiado restrictivas o no estar capturando suficientes sinónimos clínicos. También puede ocurrir que algunos perfiles de paciente no estén suficientemente enriquecidos con biomarcadores, subtipo de enfermedad o tratamientos previos.
+
+---
+
+### Análisis de errores
+
+Durante la ejecución del batch inicial se analizaron las salidas intermedias generadas por el pipeline para identificar en qué módulos se producen las principales limitaciones del sistema.
+
+El sistema consiguió completar la ejecución para los 3 pacientes/topics y generó rankings válidos para todos ellos. Sin embargo, el análisis de los archivos intermedios muestra varios puntos de mejora relevantes.
+
+#### 1. Fallo de extracción dirigida en el Topic 1
+
+En el Topic 1 se detectó un fallo importante en el módulo `Directed Patient Extractor`. El sistema generó un `Attribute Registry` con 771 atributos necesarios para evaluar los ensayos recuperados, pero la extracción dirigida falló para todos ellos.
+
+| Elemento | Valor |
+|---|---:|
+| Ensayos recuperados | 58 |
+| Criterios fuente | 2479 |
+| Atributos requeridos | 771 |
+| Atributos encontrados | 0 |
+| Errores de extracción | 771 |
+| Cobertura de extracción | 0.0% |
+
+El error registrado indica que Gemini no devolvió un JSON parseable para el esquema esperado:
+
+```text
+Directed extraction failed after 2 attempt(s): Gemini no devolvió JSON parseable para el schema LLMExtractionResponse
+```
+
+Esto provocó que muchas evaluaciones de criterios quedaran como `evaluation_error` o `unknown`, afectando directamente al ranking final.
+
+**Impacto:**  
+El ranking del Topic 1 se genera, pero con baja fiabilidad, porque el sistema no dispone de atributos clínicos extraídos para comparar correctamente paciente y criterios.
+
+**Mejora propuesta:**  
+Reducir el tamaño del `Attribute Registry`, dividir la extracción en bloques más pequeños, reforzar el esquema JSON esperado y añadir un mecanismo de recuperación cuando el LLM devuelva una salida inválida.
+
+---
+
+#### 2. Baja cobertura de extracción en Topics 2 y 3
+
+En los Topics 2 y 3 la extracción dirigida sí funcionó, pero la cobertura fue baja.
+
+| Topic | Atributos requeridos | Atributos encontrados | Cobertura |
+|---|---:|---:|---:|
+| 2 | 440 | 56 | 15.91% |
+| 3 | 295 | 28 | 10.51% |
+
+Esto significa que la mayoría de atributos necesarios para evaluar los criterios de los ensayos no estaban presentes en el expediente o no pudieron extraerse correctamente.
+
+**Impacto:**  
+Muchos criterios quedan como `unknown`, lo que reduce la confianza del ranking y provoca que el sistema no pueda confirmar si el paciente cumple o no ciertos criterios críticos.
+
+**Mejora propuesta:**  
+Mejorar la extracción clínica dirigida, priorizando primero atributos de alto impacto como edad, sexo, diagnóstico, subtipo, tratamientos previos, estado funcional, biomarcadores y criterios de exclusión frecuentes.
+
+---
+
+#### 3. Demasiados criterios críticos desconocidos
+
+El `Ranking Engine` completó la ejecución, pero generó warnings porque muchos ensayos contienen criterios hard desconocidos.
+
+| Topic | Ensayos rankeados | Ensayos con criterios críticos desconocidos |
+|---|---:|---:|
+| 1 | 58 | 50 |
+| 2 | 43 | 39 |
+| 3 | 39 | 37 |
+
+Esto indica que el sistema está recuperando y rankeando ensayos, pero en muchos casos no tiene suficiente información para evaluar criterios importantes.
+
+**Impacto:**  
+El ranking puede ordenar ensayos de forma aproximada, pero no puede asegurar con suficiente confianza la elegibilidad del paciente.
+
+**Mejora propuesta:**  
+Diferenciar mejor entre:
+
+- criterio realmente incumplido;
+- criterio desconocido por falta de información;
+- criterio administrativo no evaluable;
+- criterio clínico crítico que debería generar una pregunta prioritaria.
+
+---
+
+#### 4. Ruido en el `Attribute Registry`
+
+El análisis muestra que algunos atributos generados por el sistema son demasiado largos o poco limpios, por ejemplo atributos derivados de criterios completos en vez de conceptos clínicos concretos.
+
+Esto sugiere que el `Trial Criteria Parser` y el `Attribute Registry` todavía pueden generar atributos demasiado específicos o mal segmentados.
+
+**Impacto:**  
+Si el atributo está mal definido, el `Directed Patient Extractor` no puede encontrarlo correctamente en el expediente. Esto aumenta los `not_found`, `unknown` y errores de evaluación.
+
+**Mejora propuesta:**  
+Mejorar la normalización de atributos para que criterios largos como:
+
+```text
+Age >= 18 years and severe aortic stenosis with bicuspid anatomy...
+```
+
+se dividan en atributos simples como:
+
+```text
+age
+aortic_stenosis
+bicuspid_aortic_valve
+surgical_candidate
+informed_consent
+```
+
+---
+
+#### 5. Criterios duplicados detectados
+
+Durante la construcción del `Attribute Registry`, el sistema detectó criterios duplicados y los omitió correctamente.
+
+Ejemplo de warning:
+
+```text
+Duplicate criterion skipped
+```
+
+**Impacto:**  
+Este error es de baja severidad y no bloquea la ejecución. De hecho, indica que el sistema tiene mecanismos de limpieza y deduplicación.
+
+**Mejora propuesta:**  
+Mantener la deduplicación y registrar estos casos solo como warnings de baja prioridad.
+
+---
+
+#### 6. Predominio de resultados `unknown`
+
+El análisis de las evaluaciones muestra que muchos criterios quedan en estado `unknown`.
+
+| Topic | Criterios evaluados | `unknown` | `evaluation_error` |
+|---|---:|---:|---:|
+| 1 | 3058 | 946 | 2112 |
+| 2 | 1064 | 860 | 0 |
+| 3 | 744 | 602 | 0 |
+
+En el Topic 1 el problema principal son errores de extracción. En los Topics 2 y 3 el problema principal es la falta de información suficiente para evaluar muchos criterios.
+
+**Impacto:**  
+El sistema tiende a producir rankings conservadores, con muchos ensayos clasificados como baja coincidencia o con incertidumbre.
+
+**Mejora propuesta:**  
+Generar preguntas clínicas priorizadas para resolver los criterios desconocidos más importantes y mejorar el score de los ensayos que dependen de esa información.
+
+---
+
+### Principales limitaciones detectadas
+
+| Limitación | Impacto | Mejora propuesta |
+|---|---|---|
+| Recall@20 bajo | Se pierden muchos ensayos relevantes | Mejorar generación de queries |
+| Uso limitado de sinónimos clínicos | Puede no encontrar ensayos con terminología distinta | Ampliar normalización clínica |
+| Ranking dependiente de pocos candidatos | Aunque el ranking funcione, no puede ordenar ensayos no recuperados | Aumentar recall antes del ranking |
+| Micro-F1 no disponible | No se puede evaluar todavía criterio a criterio | Añadir gold labels de criterios |
+| Evaluación con solo 3 pacientes | Muestra pequeña | Ejecutar sobre más topics TREC |
+| Fallo de extracción dirigida en Topic 1 | Muchos criterios quedan como `evaluation_error` | Dividir la extracción en bloques y reforzar validación JSON |
+| Baja cobertura de atributos extraídos | Muchos criterios quedan como `unknown` | Priorizar atributos clínicos críticos |
+| Attribute Registry demasiado grande o ruidoso | Dificulta la extracción correcta | Simplificar y normalizar atributos |
+| Muchos criterios hard desconocidos | Reduce la confianza del ranking | Generar preguntas clínicas priorizadas |
+
+---
+
+### Conclusión de la evaluación
+
+Esta primera ejecución se considera una **baseline inicial** del sistema. La evaluación se ha realizado únicamente sobre 3 pacientes/topics, por lo que los resultados deben interpretarse con cautela y no como una medida definitiva del rendimiento general del sistema.
+
+Aun así, la ejecución permite comprobar que el pipeline funciona de extremo a extremo: procesa los pacientes, genera rankings, exporta predicciones en formato JSON y produce una salida compatible con evaluación tipo TREC.
+
+El **Recall@20 = 0.060** es bajo, lo que indica que el sistema todavía recupera pocos ensayos relevantes dentro de los primeros 20 resultados. Este resultado puede estar influido por el tamaño reducido de la muestra, pero el análisis de errores también muestra limitaciones reales en fases intermedias del pipeline, especialmente en la extracción dirigida de atributos y en la evaluación de criterios.
+
+Por otro lado, el **NDCG@10 = 0.482** muestra un comportamiento más positivo: cuando el sistema consigue recuperar ensayos relevantes, tiene cierta capacidad para ordenarlos en posiciones razonables dentro del Top 10.
+
+Por tanto, esta primera evaluación no debe interpretarse como un resultado final, sino como una primera medición funcional del sistema. La prioridad de mejora no está solo en aumentar el número de pacientes evaluados, sino también en reforzar los módulos de extracción, normalización, parseo de criterios y recuperación inicial de candidatos.
+
+Las siguientes iteraciones deberían enfocarse en:
+
+- ejecutar la evaluación sobre más pacientes/topics;
+- mejorar el `Query Planner`;
+- añadir más sinónimos clínicos;
+- usar biomarcadores, subtipo de enfermedad y tratamientos previos en las queries;
+- ajustar el `Query Refinement`;
+- dividir la extracción dirigida en bloques más pequeños;
+- mejorar la validación de JSON devuelto por el LLM;
+- simplificar el `Attribute Registry`;
+- generar preguntas clínicas priorizadas para resolver criterios `unknown`;
+- comparar futuras ejecuciones contra esta baseline inicial.
 
 ---
 
