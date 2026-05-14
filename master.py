@@ -61,7 +61,6 @@ import question_generator
 
 from question_manager import QuestionManager
 from ranking_engine import RankingEngine
-from dossier_generator import DossierGenerator
 from query_planner import QueryPlanner
 from clinicaltrials_client import ClinicalTrialsClient
 
@@ -144,6 +143,11 @@ class ClinicalMatchMaster:
 
         self.llm_client = None
 
+        # Optimización importante:
+        # En modo TREC, ClinicalTrialsClient carga el snapshot histórico y construye
+        # un índice BM25 costoso. Por eso se cachea y se reutiliza durante todo el batch.
+        self.clinical_trials_client = None
+
     # ------------------------------------------------------------------
     # Helpers básicos
     # ------------------------------------------------------------------
@@ -183,20 +187,33 @@ class ClinicalMatchMaster:
 
     def build_clinical_trials_client(self) -> ClinicalTrialsClient:
         """
-        Crea el cliente de ClinicalTrials según el modo de ejecución.
+        Crea y reutiliza el cliente de ClinicalTrials según el modo de ejecución.
 
         - trec_year=None -> API live
         - trec_year=2021/2022 -> snapshot TREC local
+
+        En modo TREC, cargar el snapshot y construir el índice BM25 es costoso.
+        Por eso este cliente se crea una sola vez por ejecución del master.
         """
+        if self.clinical_trials_client is not None:
+            return self.clinical_trials_client
+
         if self.trec_year is None:
-            return ClinicalTrialsClient(
+            print(" Inicializando ClinicalTrialsClient en modo live...")
+            self.clinical_trials_client = ClinicalTrialsClient(
                 mode="live",
             )
+        else:
+            print(
+                f" Inicializando ClinicalTrialsClient en modo TREC {self.trec_year}. "
+                "Esto puede tardar la primera vez..."
+            )
+            self.clinical_trials_client = ClinicalTrialsClient(
+                mode="trec",
+                trec_year=self.trec_year,
+            )
 
-        return ClinicalTrialsClient(
-            mode="trec",
-            trec_year=self.trec_year,
-        )
+        return self.clinical_trials_client
 
     # ------------------------------------------------------------------
     # Dossier opcional
@@ -211,10 +228,14 @@ class ClinicalMatchMaster:
         Genera el dossier PDF de un paciente.
 
         Este método solo se llama si self.generate_dossiers=True.
+        El import de DossierGenerator se hace aquí para que reportlab no sea
+        obligatorio cuando generate_dossiers=False.
         """
         output_path = Path(output_path)
 
         try:
+            from dossier_generator import DossierGenerator
+
             DossierGenerator().generate_pdf(
                 ranking_output=ranking_output,
                 output_path=output_path,
@@ -291,7 +312,14 @@ class ClinicalMatchMaster:
             print(f" Fallo en M1 InputAdapter: {e}")
             return
 
+        # ------------------------------------------------------------------
+        # Inicialización de clientes compartidos
+        # ------------------------------------------------------------------
         self.llm_client = create_llm(LLMSize.SMALL)
+
+        # Optimización:
+        # Se crea una sola vez y se reutiliza para todos los pacientes.
+        clinical_trials_client = self.build_clinical_trials_client()
 
         # ------------------------------------------------------------------
         # Procesamiento paciente a paciente
@@ -394,7 +422,7 @@ class ClinicalMatchMaster:
 
             raw_api = patient_folder / "raw_api_data.json"
 
-            self.build_clinical_trials_client().search_from_plan(
+            clinical_trials_client.search_from_plan(
                 q_plan,
                 output_path=raw_api,
             )
@@ -779,6 +807,6 @@ class ClinicalMatchMaster:
 if __name__ == "__main__":
     master = ClinicalMatchMaster(
         generate_dossiers=False,
-        trec_year=None,  # None = live | 2021/21 = TREC 2021 | 2022/22 = TREC 2022
+        trec_year=2021,  # None = live | 2021/21 = TREC 2021 | 2022/22 = TREC 2022
     )
     master.run()
