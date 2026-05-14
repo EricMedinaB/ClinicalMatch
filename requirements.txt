@@ -11,3 +11,4 @@ ir-datasets>=0.5.8
 rank-bm25>=0.2.2
 ir-datasets>=0.5.8
 rank-bm25>=0.2.2
+fpdf2>=2.7.9
