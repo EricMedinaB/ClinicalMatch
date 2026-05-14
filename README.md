@@ -744,8 +744,8 @@ ClinicalMatch/
 │   └── tests_integració/
 │
 ├── data/
-│
-├── input/
+│   ├── trec/
+│   └── input/
 │
 ├── output/
 │
