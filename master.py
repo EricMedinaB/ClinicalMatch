@@ -618,9 +618,74 @@ class ClinicalMatchMaster:
 
 
 if __name__ == "__main__":
-    master = ClinicalMatchMaster(
-        generate_dossiers=False,
-        trec_year=2021, 
-        max_trials=20,   
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="ClinicalMatch Master CLI"
     )
-    master.run()
+
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
+
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Configura el repositorio para empezar a usar ClinicalMatch",
+    )
+    setup_parser.add_argument(
+        "--api-key",
+        required=True,
+        help="API key de Gemini",
+    )
+    setup_parser.add_argument(
+        "--no-install",
+        action="store_true",
+        help="No instala requirements.txt",
+    )
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Ejecuta el pipeline completo",
+    )
+    run_parser.add_argument(
+        "--trec-year",
+        type=int,
+        default=None,
+        choices=[21, 22, 2021, 2022],
+        help="Ejecuta en modo TREC 2021 o 2022. Si se omite, usa modo live.",
+    )
+    run_parser.add_argument(
+        "--generate-dossiers",
+        action="store_true",
+        help="Genera dossiers PDF por paciente",
+    )
+    run_parser.add_argument(
+        "--max-trials",
+        type=int,
+        default=20,
+        help="Número máximo de ensayos por query/candidato cuando aplique.",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "setup":
+        master = ClinicalMatchMaster(
+            generate_dossiers=False,
+            trec_year=None,
+            max_trials=args.max_trials if hasattr(args, "max_trials") else 20,
+        )
+
+        master.setup_repository(
+            gemini_api_key=args.api_key,
+            install_requirements=not args.no_install,
+        )
+
+    elif args.command == "run":
+        master = ClinicalMatchMaster(
+            generate_dossiers=args.generate_dossiers,
+            trec_year=args.trec_year,
+            max_trials=args.max_trials,
+        )
+
+        master.run()
