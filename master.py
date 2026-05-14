@@ -6,6 +6,7 @@ import shutil
 import concurrent.futures
 from pathlib import Path
 from typing import Any, Literal, Optional
+import subprocess
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -803,10 +804,192 @@ class ClinicalMatchMaster:
         print(f" Pipeline End-to-End Completado. Entregables en: data/output/batch_{batch_num}")
         print("=" * 80)
 
+    def setup_repository(
+        self,
+        gemini_api_key: str,
+        install_requirements: bool = True,
+    ) -> None:
+        """
+        Prepara el repositorio para que un usuario pueda empezar a usarlo.
+
+        Hace:
+            - Crea/reescribe .env con la API key y modelos Gemini.
+            - Limpia data/input.
+            - Limpia data/output.
+            - Borra carpetas data/batch_N.
+            - Reinicia data/batch_counter.txt a 0.
+            - Crea carpetas necesarias si no existen.
+            - Instala dependencias desde requirements.txt si install_requirements=True.
+        """
+        if not isinstance(gemini_api_key, str) or not gemini_api_key.strip():
+            raise ValueError("gemini_api_key no puede estar vacía")
+
+        print("\n" + "=" * 80)
+        print(" CONFIGURANDO CLINICALMATCH ")
+        print("=" * 80)
+
+        # ------------------------------------------------------------------
+        # 1. Crear .env
+        # ------------------------------------------------------------------
+        env_path = self.project_root / ".env"
+
+        env_content = (
+            f"GEMINI_API_KEY={gemini_api_key.strip()}\n"
+            "GEMINI_FLASH_MODEL=gemini-3-flash-preview\n"
+            "GEMINI_FLASH_LITE_MODEL=gemini-3.1-flash-lite-preview\n"
+        )
+
+        env_path.write_text(env_content, encoding="utf-8")
+
+        print(f" .env creado en: {env_path}")
+
+        # ------------------------------------------------------------------
+        # 2. Crear carpetas base
+        # ------------------------------------------------------------------
+        self.data_path.mkdir(parents=True, exist_ok=True)
+        self.input_root.mkdir(parents=True, exist_ok=True)
+        self.output_root.mkdir(parents=True, exist_ok=True)
+        self.qrels_root.mkdir(parents=True, exist_ok=True)
+
+        # ------------------------------------------------------------------
+        # 3. Vaciar data/input
+        # ------------------------------------------------------------------
+        self._empty_directory(self.input_root)
+        print(f" Carpeta de entrada vaciada: {self.input_root}")
+
+        # ------------------------------------------------------------------
+        # 4. Vaciar data/output
+        # ------------------------------------------------------------------
+        self._empty_directory(self.output_root)
+        print(f" Carpeta de salida vaciada: {self.output_root}")
+
+        # ------------------------------------------------------------------
+        # 5. Borrar data/batch_N
+        # ------------------------------------------------------------------
+        removed_batches = 0
+
+        for path in self.data_path.iterdir():
+            if path.is_dir() and path.name.startswith("batch_"):
+                shutil.rmtree(path)
+                removed_batches += 1
+
+        print(f" Carpetas batch_N eliminadas: {removed_batches}")
+
+        # ------------------------------------------------------------------
+        # 6. Reiniciar contador de batches
+        # ------------------------------------------------------------------
+        batch_counter_path = self.data_path / "batch_counter.txt"
+        batch_counter_path.write_text("0", encoding="utf-8")
+
+        print(f" Contador reiniciado: {batch_counter_path}")
+
+        # ------------------------------------------------------------------
+        # 7. Instalar requirements
+        # ------------------------------------------------------------------
+        if install_requirements:
+            requirements_path = self.project_root / "requirements.txt"
+
+            if not requirements_path.exists():
+                print(f" Aviso: no existe requirements.txt en {requirements_path}")
+            else:
+                print(" Instalando dependencias desde requirements.txt...")
+
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pip",
+                        "install",
+                        "-r",
+                        str(requirements_path),
+                    ]
+                )
+
+                print(" Dependencias instaladas correctamente.")
+
+        print("\n Configuración completada.")
+        print(" Ahora coloca tus XML en data/input/ y ejecuta:")
+        print(" python master.py run")
+        print("=" * 80)
+
+
+    def _empty_directory(
+        self,
+        directory: str | Path,
+    ) -> None:
+        """
+        Vacía una carpeta sin eliminar la propia carpeta.
+        """
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        for item in directory.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+
 
 if __name__ == "__main__":
-    master = ClinicalMatchMaster(
-        generate_dossiers=False,
-        trec_year=2021,  # None = live | 2021/21 = TREC 2021 | 2022/22 = TREC 2022
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="ClinicalMatch Master CLI"
     )
-    master.run()
+
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
+
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Configura el repositorio para empezar a usar ClinicalMatch",
+    )
+
+    setup_parser.add_argument(
+        "--api-key",
+        required=True,
+        help="API key de Gemini",
+    )
+
+    setup_parser.add_argument(
+        "--no-install",
+        action="store_true",
+        help="No instala requirements.txt",
+    )
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Ejecuta el pipeline completo",
+    )
+
+    run_parser.add_argument(
+        "--trec-year",
+        type=int,
+        default=None,
+        choices=[21, 22, 2021, 2022],
+        help="Ejecuta en modo TREC 2021 o 2022. Si se omite, usa modo live.",
+    )
+
+    run_parser.add_argument(
+        "--generate-dossiers",
+        action="store_true",
+        help="Genera dossiers PDF por paciente",
+    )
+
+    args = parser.parse_args()
+
+    master = ClinicalMatchMaster(
+        generate_dossiers=getattr(args, "generate_dossiers", False),
+        trec_year=getattr(args, "trec_year", None),
+    )
+
+    if args.command == "setup":
+        master.setup_repository(
+            gemini_api_key=args.api_key,
+            install_requirements=not args.no_install,
+        )
+
+    elif args.command == "run":
+        master.run()
