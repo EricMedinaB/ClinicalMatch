@@ -7,3 +7,7 @@ pytest>=8.0.0
 fpdf>=1.7.2
 reportlab>=4.0.0
 google-genai>=1.0.0
+ir-datasets>=0.5.8
+rank-bm25>=0.2.2
+ir-datasets>=0.5.8
+rank-bm25>=0.2.2
