@@ -971,6 +971,3 @@ El `Prediction Exporter` permite generar una salida unificada para todos los pac
 Víctor Segura García,
 Alex Ruiz Zapater
 ```
-
-```
-```
