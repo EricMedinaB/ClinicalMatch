@@ -547,7 +547,27 @@ Determina si cada criterio se cumple, no se cumple, es desconocido, no aplica o 
 ### 12. `Ranking Engine`
 
 **Responsabilidad:**
-Asignar una puntuación final a cada ensayo según los criterios evaluados.
+Asignar una puntuación final a cada ensayo clínico a partir de la evaluación de sus criterios de inclusión y exclusión.
+
+El `Ranking Engine` recibe la salida del `Criterion Evaluator`, donde cada criterio ya ha sido clasificado como:
+
+- `met`: el criterio se cumple.
+- `not_met`: el criterio no se cumple.
+- `unknown`: no hay información suficiente.
+- `not_applicable`: el criterio no aplica.
+- `evaluation_error`: no se ha podido evaluar correctamente.
+
+A partir de esto, el módulo calcula un score entre `0` y `100` para cada ensayo.
+
+---
+
+#### Idea general de la fórmula
+
+La puntuación se calcula criterio a criterio. Cada criterio aporta una cantidad positiva o negativa al resultado final según tres factores principales:
+
+```text
+valor del criterio × peso por dureza × peso por categoría × factor de confianza
+```
 
 **Entrada:**
 
